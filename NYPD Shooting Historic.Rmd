@@ -1,0 +1,340 @@
+---
+title: "NYPD Historic Shooting Data"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+#### R Code for visuals posted at end of document
+
+### Data Analysis and Purpose
+&nbsp;
+
+This data set comes from New York City's police department. The dataset gives information such as location, date/time, age information, and further info on all reported shootings occurring in the city from 2006-2020. 
+
+The below report attempts to analyze the effect of Perpetrator age, NYC borough, and victim race on the overall volume of reported shootings.
+
+Other areas will be analyzed (such as year of shooting) however the above will be the primary areas of interest.
+&nbsp;
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+
+#import libraries
+#PLEASE NOTE: PLEASE INSTALL BELOW PACKAGES PRIOR TO RUNNING IF NOT PREVIOUSLY INSTALLED
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(scales)
+
+#import data to read and store as variable
+shooting_data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv")
+
+#update date fields to proper class
+shooting_data$OCCUR_DATE <- mdy(shooting_data$OCCUR_DATE)
+
+#update age groups to a factor variable
+#Age Groups listed as "UNKNOWN" will be changed to NA and will be treated the same
+
+shooting_data$PERP_AGE_GROUP <- factor(shooting_data$PERP_AGE_GROUP,
+                                          levels = c("<18", "18-24", "25-44", "45-64", "65+", "UNKNOWN"))
+
+
+shooting_data$VIC_AGE_GROUP <- factor(shooting_data$VIC_AGE_GROUP,
+                                         levels = c("<18", "18-24", "25-44", "45-64", "65+", "UNKNOWN"))
+#If NA group with Unknown
+shooting_data$PERP_AGE_GROUP[is.na(shooting_data$PERP_AGE_GROUP)] <- "UNKNOWN"
+shooting_data$VIC_AGE_GROUP[is.na(shooting_data$VIC_AGE_GROUP)] <- "UNKNOWN"
+
+
+
+```
+
+# NYC Shooting Data Visualizations
+
+## Borough and Age Analysis
+
+The bar plot visual shows that there have been slight differences in the age group of the perpetrator across different boroughs. Queens especially has a higher percentage than other boroughs of shootings where the victim is older than age 25. Staten Island also has the highest percentage volume where the perpetrator age is above 65. However, across all boroughs it is clear that **age groups 18-24 (blue) and 25-44 (green) make up the majority of the shootings** where the perpetrator age is known.
+
+
+&nbsp;
+
+```{r boro_vis, fig.width = 10, fig.height = 7}
+# group by boro for facet wrapping 
+# group by perp age group for bar plot
+# Factor the boro to order by volume of shootings
+
+boro_grouped <- shooting_data %>%
+  mutate(BORO = fct_infreq(BORO)) %>%
+  group_by(PERP_AGE_GROUP, BORO) %>%
+  summarise(shootings = n())
+
+
+# Create bar plot by Boro
+# remove records where perp age group is unknown - visual will only display data where age group is known and the plot title must reflect this
+# Color or "fill" of bar will be perp age group
+# Coord flip to have plot display horizontally
+# fct_rev boro to have highest shooting volume on top of graph
+# fct_rev perp age group to have age groups sorted in ascending from left to right
+
+boro_plot <- boro_grouped %>%
+  filter((PERP_AGE_GROUP != "UNKNOWN")) %>%
+  ggplot(aes(x = fct_rev(BORO), y = shootings, fill = fct_rev(PERP_AGE_GROUP))) +
+  geom_col(position = "fill") +
+  theme_classic() +
+  labs(x = "NYC Borough", y = "Percentage of Shootings", fill = "Perpetrator Age Group", 
+       title = "NYC Historical Cop Shooting by Borough and Perp Age",
+       #subtitle = "Boroughs Sorted by Shooting Volume (Most on Top)", 
+       caption = "Omits Shootings if Age Group is Unknown") +
+  scale_y_continuous(labels = percent) +
+  guides(fill = guide_legend(reverse = T)) +
+  scale_fill_brewer(palette = "Pastel2", direction = -1) +
+  coord_flip()
+
+boro_plot
+
+# Display table showing raw data directly below plot
+# This table will include shootings where age is unknown
+# First get totals by Boro
+boro_totals <- shooting_data %>%
+  group_by(BORO) %>%
+  summarise(Total = n()) %>%
+  arrange(desc(Total))
+
+# Add a column displaying row totals
+boro_wide <- boro_grouped %>%
+  pivot_wider(names_from = PERP_AGE_GROUP, values_from = shootings) %>%
+  mutate(Total = boro_totals$Total)
+  
+#Add one last row to boro wide table adding in totals for age groups
+boro_wide <- boro_wide %>%
+  bind_rows(summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+
+# print table
+boro_wide_print <- kable(boro_wide, caption = "Volume of Shootings by Borough and Age Group")
+
+
+```
+
+
+&nbsp;
+
+
+Unfortunately the perpetrator age group has not been recorded properly in far too many instances. While Staten Island has a relatively low percentage of shootings where the perpetrator age group is unknown, the data table shows **49% (11,618 out of 23,568) of all shootings have an unknown age** group of the perpetrator. Given this significant percentage it is hard to know if one or more age groups are being underrepresented. It could **potentially be dangerous to make assumptions based on perpetrator age group.**
+
+`r boro_wide_print`
+&nbsp;
+&nbsp;
+&nbsp;
+
+
+## Shootings Over Time by Victim Race
+
+&nbsp;
+
+```{r vic_race_plot, fig.width=10, fig.height = 8}
+
+race_group <- shooting_data %>%
+  mutate(Year = as.factor(year(OCCUR_DATE)),
+         VIC_RACE = fct_infreq(VIC_RACE)) %>%
+  group_by(Year, VIC_RACE) %>%
+  summarise(Counts = n()) %>%
+  group_by(Year) %>%
+  mutate(Year_Totals = sum(Counts)) %>%
+  ungroup()
+
+
+race_plot <- race_group %>%
+  ggplot(aes(x = fct_rev(Year), y = Counts, fill = fct_rev(VIC_RACE))) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  labs(x = "Year of Shooting", y = "Count of Shootings", fill = "Victim Race", 
+       title = "NYC Shootings by Year and Race of Victim") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Pastel1", direction = -1)
+  
+race_plot
+
+
+```
+
+&nbsp;
+
+### Race and Borough Linear Model 
+
+```{r race_model, include = TRUE, echo = TRUE}
+race_boro <- shooting_data %>%
+  group_by(VIC_RACE, BORO) %>%
+  summarise(Counts = n())
+
+
+race_model <- lm(Counts ~ VIC_RACE + BORO, data = race_boro)
+
+print(race_model)
+
+summary(race_model)
+
+
+```
+
+&nbsp;
+
+
+The most dramatic takeaway from this plot is the resurgence in reported shootings occurring in 2020. Shooting volume overall had began to decline after 2011. The 3 year stretch prior to 2020 (2017-2019) had the lowest total shooting volumes recorded in the dataset averaging 959 recorded shootings. The highest shooting volume in that timespan was 969 (2017) which was 239 less than the fourth lowest shooting volume recorded one year earlier (2016).
+
+This is what made the dramatic rise in 2020 so noticeable on the graph. The **2020 total was 1,942 more than double** the volume recorded in 2020. It was the highest recorded total since 2008 and the third highest yearly volume recorded in the dataset. 
+
+
+The other dramatic takeaway from the visual is the consistently large red portion of the graph representing shooting victims who are black. Victims of this race especially rose in 2020 which was largely responsible, although far from solely responsible, for the dramatic 2020 increase. It should also be noted that Hispanic Americans, represented in Blue and Green, have the next highest overall volume. The White Hispanic group had its largest volume in 2006 before decreasing and holding steady. The White Hispanic group also had a large 2020 increase.
+
+
+&nbsp;
+&nbsp;
+
+### Bias Takeaways
+
+With this analysis there are some potential areas of bias. Clearly based on the first graph and the table displaying age group of the perpetrator there are significant differences in collection between the boroughs. Staten Island appears to have more complete data on these shootings than other boroughs who have the vast majority of shootings such as Brooklyn and the Bronx. The differences in data collection and lack of information provided on age group leads to a very incomplete analysis.
+
+It must also be noted that these are not all shootings in New York City but reported shootings. There is always a potential bias that in a year where more people were stuck inside and likely watching news and/or hearing about shootings such as 2020 that they were more likely to report incidents to the police.
+
+It is hard to know if there is racial bias in the reported shootings. Is it possible that white victims were undereported due to less police presence in the areas where white people live? Is it possible that any race was more likely and trusting of the police and legal process to report the shootings than others?
+
+
+**Regarding the model - unfortunately the borough data and how it affects the total counts is incomplete. In future analysis the population of the boroughs should be included and compared to truly see how the borough affects the shootings per person. Similarly the population of each race must be compared as well to truly investigate correlations between race and overall volume. Yes there was a correlation but population for borough and race is not factored in at all yielding a very incomplete analysis.**
+
+
+&nbsp;
+
+#### Personal Bias
+
+
+Regarding personal bias it is hard to remove from an analysis. Knowing the boroughs of the city fairly well I attempted to attack my pre-existing beliefs of where violence would be occurring. While simply looking at a borough level is not enough I was very surprised to see how Brooklyn dominated reported shootings. While I expected Brooklyn to be high given that it was the most populous borough, it held a more significant percentage than expected as shown in the data table. I also expected the Bronx to be higher than it was given the reputation that the borough has as a whole. Overall with the borough analysis I tried to challenge my personal beliefs head on.
+
+Race obviously is a tricky area for personal bias as well. Once again to take this into account I tried to simply let the numbers and visuals do the talking and answering questions regarding the shooting data and race.
+
+
+&nbsp;
+&nbsp;
+&nbsp;
+
+## Final Conclusion
+&nbsp;
+There are few conclusive takeaways from the visuals and the model provided here. Outside of the difference in collection of perpetrator age - omitted in the model - the main takeaway are the questions to investigate next. Are black individuals in Brookyln more in danger of being shot than a White individual in Manhattan? Or would including population for both borough and race show that this is not the case. In addition, the makeup of individual neighborhoods within a borough is so different. I would love to include zip codes or individual neighborhoods in this analysis to see which areas of the city may be more dangerous.
+
+What we can see is how Brooklyn and black victims dominate the overall reported shootings. We need to look at more data and dig deeper to understand if this is the case at a per person level and potentially find the specific areas in the borough where this occurring. 
+
+# R CODE FOR DATATABLES AND VISUALS
+&nbsp;
+
+```{r echo = TRUE, eval = FALSE}
+
+#import libraries
+#PLEASE NOTE: PLEASE INSTALL BELOW PACKAGES PRIOR TO RUNNING IF NOT PREVIOUSLY INSTALLED
+library(tidyverse)
+library(lubridate)
+library(knitr)
+library(scales)
+
+#import data to read and store as variable
+shooting_data <- read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv")
+
+#update date fields to proper class
+shooting_data$OCCUR_DATE <- mdy(shooting_data$OCCUR_DATE)
+
+#update age groups to a factor variable
+#Age Groups listed as "UNKNOWN" will be changed to NA and will be treated the same
+
+shooting_data$PERP_AGE_GROUP <- factor(shooting_data$PERP_AGE_GROUP,
+                                          levels = c("<18", "18-24", "25-44", "45-64", "65+", "UNKNOWN"))
+
+
+shooting_data$VIC_AGE_GROUP <- factor(shooting_data$VIC_AGE_GROUP,
+                                         levels = c("<18", "18-24", "25-44", "45-64", "65+", "UNKNOWN"))
+#If NA group with Unknown
+shooting_data$PERP_AGE_GROUP[is.na(shooting_data$PERP_AGE_GROUP)] <- "UNKNOWN"
+shooting_data$VIC_AGE_GROUP[is.na(shooting_data$VIC_AGE_GROUP)] <- "UNKNOWN"
+
+
+
+
+# group by boro for facet wrapping 
+# group by perp age group for bar plot
+# Factor the boro to order by volume of shootings
+
+boro_grouped <- shooting_data %>%
+  mutate(BORO = fct_infreq(BORO)) %>%
+  group_by(PERP_AGE_GROUP, BORO) %>%
+  summarise(shootings = n())
+
+
+# Create bar plot by Boro
+# remove records where perp age group is unknown - visual will only display data where age group is known and the plot title must reflect this
+# Color or "fill" of bar will be perp age group
+# Coord flip to have plot display horizontally
+# fct_rev boro to have highest shooting volume on top of graph
+# fct_rev perp age group to have age groups sorted in ascending from left to right
+
+boro_plot <- boro_grouped %>%
+  filter((PERP_AGE_GROUP != "UNKNOWN")) %>%
+  ggplot(aes(x = fct_rev(BORO), y = shootings, fill = fct_rev(PERP_AGE_GROUP))) +
+  geom_col(position = "fill") +
+  theme_classic() +
+  labs(x = "NYC Borough", y = "Percentage of Shootings", fill = "Perpetrator Age Group", 
+       title = "NYC Historical Cop Shooting by Borough and Perp Age",
+       #subtitle = "Boroughs Sorted by Shooting Volume (Most on Top)", 
+       caption = "Omits Shootings if Age Group is Unknown") +
+  scale_y_continuous(labels = percent) +
+  guides(fill = guide_legend(reverse = T)) +
+  scale_fill_brewer(palette = "Pastel2", direction = -1) +
+  coord_flip()
+
+boro_plot
+
+# Display table showing raw data directly below plot
+# This table will include shootings where age is unknown
+# First get totals by Boro
+boro_totals <- shooting_data %>%
+  group_by(BORO) %>%
+  summarise(Total = n()) %>%
+  arrange(desc(Total))
+
+# Add a column displaying row totals
+boro_wide <- boro_grouped %>%
+  pivot_wider(names_from = PERP_AGE_GROUP, values_from = shootings) %>%
+  mutate(Total = boro_totals$Total)
+  
+#Add one last row to boro wide table adding in totals for age groups
+boro_wide <- boro_wide %>%
+  bind_rows(summarise_all(., ~if(is.numeric(.)) sum(.) else "Total"))
+
+# print table
+boro_wide_print <- kable(boro_wide, caption = "Volume of Shootings by Borough and Age Group")
+
+boro_wide_print
+
+
+
+race_group <- shooting_data %>%
+  mutate(Year = as.factor(year(OCCUR_DATE)),
+         VIC_RACE = fct_infreq(VIC_RACE)) %>%
+  group_by(Year, VIC_RACE) %>%
+  summarise(Counts = n()) %>%
+  group_by(Year) %>%
+  mutate(Year_Totals = sum(Counts)) %>%
+  ungroup()
+
+
+race_plot <- race_group %>%
+  ggplot(aes(x = fct_rev(Year), y = Counts, fill = fct_rev(VIC_RACE))) +
+  geom_bar(stat = "identity") +
+  theme_classic() +
+  labs(x = "Year of Shooting", y = "Count of Shootings", fill = "Victim Race", 
+       title = "NYC Shootings by Year and Race of Victim") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Pastel1", direction = -1)
+  
+race_plot
+
+
+```
+
